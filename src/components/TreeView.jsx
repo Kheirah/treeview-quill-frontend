@@ -11,7 +11,7 @@ import { RiAccountCircleLine } from "react-icons/ri";
 import { IoDocumentTextOutline } from "react-icons/io5";
 
 function DirectoryTreeView({ tree, onSelectNode, selectedNodeId }) {
-  console.log(selectedNodeId);
+  /* console.log(selectedNodeId); */
   return (
     <div>
       <div className="directory">

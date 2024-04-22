@@ -3,98 +3,6 @@ import { Navbar } from "./components/Navbar";
 import ReactQuill from "react-quill";
 import { useState, useEffect } from "react";
 import "react-quill/dist/quill.snow.css";
-import { v4 as uuid } from "uuid";
-
-const rootId = uuid();
-const bookId = uuid();
-const chapterOneId = uuid();
-const sceneOneId = uuid();
-const sceneTwoId = uuid();
-const sceneThreeId = uuid();
-const chapterTwoId = uuid();
-const ideasId = uuid();
-const charactersId = uuid();
-
-const folder = [
-  {
-    id: rootId,
-    name: "Root",
-    children: [bookId, ideasId, charactersId],
-    isBranch: true,
-    parent: null,
-  },
-  {
-    id: bookId,
-    name: "Book",
-    isBranch: true,
-    children: [chapterOneId],
-    parent: rootId,
-  },
-  {
-    id: chapterOneId,
-    name: "Kapitel 1",
-    isBranch: true,
-    children: [sceneOneId, sceneTwoId, sceneThreeId],
-    parent: bookId,
-  },
-  {
-    id: sceneOneId,
-    name: "Szene 1",
-    isBranch: false,
-    children: [],
-    parent: chapterOneId,
-  },
-  {
-    id: sceneTwoId,
-    name: "Szene 2",
-    isBranch: false,
-    children: [],
-    parent: chapterOneId,
-  },
-  {
-    id: sceneThreeId,
-    name: "Szene 3",
-    isBranch: false,
-    children: [],
-    parent: chapterOneId,
-  },
-  {
-    id: chapterTwoId,
-    name: "Kapitel 2",
-    isBranch: true,
-    children: [],
-    parent: bookId,
-  },
-  {
-    id: ideasId,
-    name: "Ideen",
-    isBranch: true,
-    children: [],
-    parent: rootId,
-  },
-  {
-    id: charactersId,
-    name: "Charactere",
-    isBranch: true,
-    children: [],
-    parent: rootId,
-  },
-];
-
-const fileContents = [
-  {
-    id: sceneOneId,
-    content: "Hello World! This is Scene 1.",
-  },
-  {
-    id: sceneTwoId,
-    content: "Hello World!  This is Scene 2.",
-  },
-  {
-    id: sceneThreeId,
-    content: "Hello World!  This is Scene 3.",
-  },
-];
 
 const modules = {
   toolbar: [
@@ -113,19 +21,57 @@ const modules = {
 };
 
 function App() {
-  const [selectedNodeId, setSelectedNodeId] = useState(rootId);
-  const [tree, setTree] = useState(folder);
-  const [value, setValue] = useState("");
-
-  const currentContent = fileContents.find(
-    (file) => file.id === selectedNodeId
-  );
+  const [selectedNodeId, setSelectedNodeId] = useState(1);
+  const [quillContent, setQuillContent] = useState("");
+  const [note, setNote] = useState();
+  const [tree, setTree] = useState([
+    {
+      id: 1,
+      name: "Root",
+      children: [],
+      isBranch: true,
+      parent: null,
+    },
+  ]);
 
   useEffect(() => {
-    setValue(currentContent?.content);
-  }, [currentContent]);
+    async function getNodes() {
+      const response = await fetch("http://localhost:3000/nodes");
+      const data = await response.json();
+      setTree(data);
+    }
+    getNodes();
+  }, []);
 
-  function handleAddNode(isBranch) {
+  useEffect(() => {
+    async function getNote() {
+      const response = await fetch(
+        `http://localhost:3000/notes/${selectedNodeId}`
+      );
+      const data = await response.json();
+      setNote(data);
+      setQuillContent(data?.content || "");
+    }
+    getNote();
+  }, [selectedNodeId]);
+
+  async function handleSaveNote() {
+    if (!note || !quillContent) return;
+
+    const response = await fetch(`http://localhost:3000/notes/${note?._id}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        content: quillContent,
+      }),
+    });
+
+    await response.json();
+  }
+
+  async function handleAddNode(isBranch) {
     const nodeName = window.prompt(
       `Wie soll ${isBranch ? "der neue Folder" : "die neue Datei"} heißen?`,
       `New ${isBranch ? "folder" : "file"}`
@@ -133,52 +79,113 @@ function App() {
     if (!nodeName) return;
 
     const currentNode = tree.find((treeNode) => treeNode.id === selectedNodeId);
+
     if (currentNode.isBranch === false) {
       // ist kein Ordner
       const parentId = currentNode.parent;
       const parentNode = tree.find((treeNode) => treeNode.id === parentId);
 
       const newNode = {
-        id: uuid(),
         name: nodeName,
         isBranch,
-        children: [],
         parent: parentNode.id,
       };
+
+      // create new node
+      const responseNewNode = await fetch("http://localhost:3000/nodes", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newNode),
+      });
+
+      const newNodeInDB = await responseNewNode.json();
+
+      // add new node id to parent's children array
+      const responseEditedNode = await fetch(
+        `http://localhost:3000/nodes/${parentNode.id}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            nodeId: newNodeInDB.id,
+          }),
+        }
+      );
+
+      await responseEditedNode.json();
+
+      // create new, empty note
+      const responseNewNote = await fetch("http://localhost:3000/notes", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          node: newNodeInDB.id,
+        }),
+      });
 
       const newTree = tree.map((node) => {
         if (node.id === parentNode.id) {
           return {
             ...node,
-            children: [...node.children, newNode.id],
+            children: [...node.children, newNodeInDB.id],
           };
         } else {
           return node;
         }
       });
-      setTree([...newTree, newNode]);
+      setTree([...newTree, newNodeInDB]);
     } else {
       // ist ein Ordner
 
       const newNode = {
-        id: uuid(),
         name: nodeName,
         isBranch,
-        children: [],
         parent: selectedNodeId,
       };
+
+      const responseNewNode = await fetch("http://localhost:3000/nodes", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(newNode),
+      });
+
+      const newNodeInDB = await responseNewNode.json();
+
+      const responseEditedNode = await fetch(
+        `http://localhost:3000/nodes/${selectedNodeId}`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            nodeId: newNodeInDB.id,
+          }),
+        }
+      );
+
+      await responseEditedNode.json();
 
       const newTree = tree.map((node) => {
         if (node.id === selectedNodeId) {
           return {
             ...node,
-            children: [...node.children, newNode.id],
+            children: [...node.children, newNodeInDB.id],
           };
         } else {
           return node;
         }
       });
-      setTree([...newTree, newNode]);
+
+      setTree([...newTree, newNodeInDB]);
     }
   }
 
@@ -194,16 +201,22 @@ function App() {
           setTree={setTree}
         />
       </div>
-      <div className="relative h-screen w-full">
-        <div className="flex h-full w-full items-center justify-center">
-          <div className="relative h-full w-2/4 flex items-center justify-center">
+      <div className="h-screen">
+        <div className="flex h-full justify-center">
+          <div className="flex w-2/4 gap-4">
             <ReactQuill
               theme="snow"
-              value={value}
-              onChange={setValue}
-              className="h-full w-full "
+              value={quillContent}
+              onChange={setQuillContent}
+              className="h-full w-full"
               modules={modules}
             />
+            <button
+              className="mt-10 bg-gray-50 cursor-pointer border border-gray-400 rounded-md px-6 h-12"
+              onClick={handleSaveNote}
+            >
+              Speichern
+            </button>
           </div>
         </div>
       </div>
